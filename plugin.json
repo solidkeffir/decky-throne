@@ -1,11 +1,20 @@
 {
   "name": "Throne VPN",
-  "author": "decky-throne",
-  "flags": ["root"],
+  "author": "solidkeffir",
+  "flags": [
+    "root"
+  ],
   "api_version": 2,
   "publish": {
-    "tags": ["vpn", "proxy", "network", "throne", "sing-box", "vless"],
+    "tags": [
+      "vpn",
+      "proxy",
+      "network",
+      "throne",
+      "sing-box",
+      "vless"
+    ],
     "description": "Control Throne (sing-box: VLESS/Reality, XHTTP, Hysteria2, Trojan, Shadowsocks...) from Game Mode: connect, pick a server, update subscriptions. Installs headless Throne by itself; no sudo password needed.",
-    "image": ""
+    "image": "https://raw.githubusercontent.com/solidkeffir/decky-throne/main/assets/icon.svg"
   }
 }
