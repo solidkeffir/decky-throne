@@ -4,8 +4,8 @@
 
 <img src="assets/cover.svg" alt="Throne VPN for Steam Deck: Decky Loader Game Mode VPN plugin and one-script installer" width="100%"/>
 
-> **Steam Deck / SteamOS port of [Throne](https://github.com/throneproj/Throne)**
-> One-script Desktop Mode installer + Decky Loader Game Mode VPN plugin.
+> **Steam Deck / SteamOS port of [Throne](https://github.com/throneproj/Throne)**<br>
+> One-script Desktop Mode installer + Decky Loader Game Mode VPN plugin.<br>
 > Powered by [sing-box](https://github.com/SagerNet/sing-box) · Supports VLESS/Reality, XHTTP, VMess, Trojan, Hysteria 2, TUIC, Shadowsocks, WireGuard, AmneziaWG…
 
 [![Release](https://img.shields.io/github/v/release/solidkeffir/decky-throne?style=flat-square&color=7c5cff)](https://github.com/solidkeffir/decky-throne/releases/latest)

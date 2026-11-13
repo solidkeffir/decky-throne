@@ -4,8 +4,8 @@
 
 <img src="assets/cover.svg" alt="Throne VPN для Steam Deck: плагин Decky Loader для игрового режима и установщик одним скриптом" width="100%"/>
 
-> **Порт [Throne](https://github.com/throneproj/Throne) для Steam Deck / SteamOS**
-> Установщик одним скриптом для режима рабочего стола + плагин Decky Loader для игрового режима.
+> **Порт [Throne](https://github.com/throneproj/Throne) для Steam Deck / SteamOS**<br>
+> Установщик одним скриптом для режима рабочего стола + плагин Decky Loader для игрового режима.<br>
 > Ядро [sing-box](https://github.com/SagerNet/sing-box) и Xray · VLESS/Reality, XHTTP, VMess, Trojan, Hysteria 2, TUIC, Shadowsocks, WireGuard, AmneziaWG…
 
 [![Release](https://img.shields.io/github/v/release/solidkeffir/decky-throne?style=flat-square&color=7c5cff)](https://github.com/solidkeffir/decky-throne/releases/latest)
