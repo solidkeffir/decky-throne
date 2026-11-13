@@ -27,10 +27,20 @@ The Decky plugin supports VPN on/off, subscription and server selection, latency
 > Inspired by [**hiddify-steam-deck-vpn**](https://github.com/b-ostrov/hiddify-steam-deck-vpn),
 > the Hiddify plugin for Steam Deck — see [Acknowledgements](#acknowledgements).
 
-## Steam Deck VPN For Restricted Internet Access
+## 🌙 Need a server? M00NL3S5 VPN
 
-This project is for Steam Deck users who need a VPN on SteamOS when internet access is
-blocked, filtered or unreliable in their country, ISP, hotel, campus or public Wi-Fi.
+Looking for a VPN subscription that works with this plugin out of the box? Try
+**M00NL3S5 VPN**: VLESS + Reality and XHTTP on an up-to-date Xray server. The subscription
+link goes straight into Throne, and the same subscription works on your phone and PC.
+
+- 🤖 **Telegram bot: [@M00NL3S5VPNbot](https://t.me/M00NL3S5VPNbot)** — free 3-day trial,
+  payment and your subscription link right in Telegram, from 150 ₽ a month
+- 📢 **News channel: [@m00nl3s5VPN](https://t.me/m00nl3s5VPN)**
+
+## Why Throne VPN on Steam Deck
+
+This project is for Steam Deck users who want a VPN on SteamOS: for privacy on hotel,
+campus or public Wi-Fi, a stable route to game servers, or their own VPN server.
 
 Use Throne VPN for Steam Deck when you want:
 
