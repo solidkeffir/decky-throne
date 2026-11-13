@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+# Throne VPN для Steam Deck — установщик для режима рабочего стола.
+#
+#   bash throne-deck-install.sh              установить или обновить всё и открыть Throne
+#   bash throne-deck-install.sh --uninstall  удалить плагин, службу и ярлыки (профили остаются)
+#
+# Что делает:
+#   1. sudo: если у пользователя deck нет пароля, предлагает задать его (Decky без него не ставится);
+#   2. Decky Loader — официальным установщиком, если его ещё нет;
+#   3. Throne — последний релиз с GitHub (throneproj/Throne, linux-amd64), сверка SHA-256;
+#   4. плагин Decky «Throne VPN» (вшит в этот скрипт);
+#   5. ярлык «Throne» в меню и на рабочем столе и открывает окно Throne,
+#      куда вставляется ссылка на подписку.
+# Окно Throne и игровой режим используют одни профили (~/.config/Throne).
+set -euo pipefail
+
+PLUGIN_VERSION="@PLUGIN_VERSION@"
+PLUGIN="decky-throne"
+UNIT="decky-throne.service"
+THRONE_REPO="throneproj/Throne"
+DECKY_INSTALLER="https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh"
+
+HB="$HOME/homebrew"
+DATA="$HB/data/$PLUGIN"
+APP="$DATA/throne"
+PLUG="$HB/plugins/$PLUGIN"
+SHARE="$HOME/.local/share/$PLUGIN"
+GUI="$SHARE/throne-gui.sh"
+DESKTOP_FILE="throne-deck.desktop"
+
+say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+ok()   { printf '\033[1;32m ✓\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m !\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+preflight() {
+    [ "$(id -u)" -ne 0 ] || die "запускайте без sudo, от своего пользователя: bash $0"
+    [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || die "нужен Steam Deck / Linux x86_64"
+    for c in curl python3 tar base64 sha256sum systemctl sudo; do
+        command -v "$c" >/dev/null || die "не найдена команда $c"
+    done
+}
+
+ensure_sudo() {
+    if sudo -n true 2>/dev/null; then return; fi
+    if [ "$(passwd -S "$(id -un)" 2>/dev/null | awk '{print $2}')" = "NP" ]; then
+        say "У пользователя $(id -un) нет пароля, а без него нельзя поставить Decky и службу."
+        say "Придумайте пароль (при вводе символы не видны):"
+        passwd </dev/tty || die "пароль не задан"
+    fi
+    say "Введите пароль $(id -un) для sudo:"
+    sudo -v </dev/tty || die "sudo не сработал"
+    # sudo не должен забыть пароль за время скачивания
+    ( while kill -0 $$ 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
+}
+
+install_decky() {
+    if [ -x "$HB/services/PluginLoader" ] && systemctl is-enabled --quiet plugin_loader 2>/dev/null; then
+        ok "Decky Loader уже установлен ($(cat "$HB/services/.loader.version" 2>/dev/null || echo '?'))"
+        return
+    fi
+    say "Ставлю Decky Loader (официальный установщик)…"
+    command -v jq >/dev/null || die "установщику Decky нужен jq, а его нет в системе"
+    curl -fsSL -o "$WORK/decky.sh" "$DECKY_INSTALLER" || die "не удалось скачать установщик Decky"
+    sudo bash "$WORK/decky.sh" || die "установщик Decky завершился с ошибкой"
+    [ -x "$HB/services/PluginLoader" ] || die "Decky Loader не установился"
+    ok "Decky Loader установлен"
+}
+
+# Печатает: версия, имя файла, URL, sha256 последнего Throne для linux-amd64.
+throne_release() {
+    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: decky-throne' \
+        "https://api.github.com/repos/$THRONE_REPO/releases/latest" | python3 -I -c '
+import json, re, sys
+rel = json.load(sys.stdin)
+for a in rel.get("assets", []):
+    if re.fullmatch(r"Throne-[0-9][^-]*-linux-amd64\.zip", a.get("name", "")):
+        d = a.get("digest") or ""
+        print(rel.get("tag_name", ""), a["name"], a["browser_download_url"],
+              d[7:] if d.startswith("sha256:") else "-")
+        break
+'
+}
+
+extract_throne() {  # zip dest
+    python3 -I - "$1" "$2" <<'PY'
+import os, stat, sys, zipfile
+src, dest = sys.argv[1], sys.argv[2]
+os.makedirs(dest)
+with zipfile.ZipFile(src) as z:
+    for i in z.infolist():
+        if not i.filename.startswith("Throne/"):
+            continue
+        rel = i.filename[len("Throne/"):]
+        parts = rel.rstrip("/").split("/")
+        if not rel or any(p in ("", ".", "..") for p in parts):
+            if rel:
+                sys.exit(f"unsafe path in ZIP: {i.filename}")
+            continue
+        target = os.path.join(dest, *parts)
+        mode = (i.external_attr >> 16) & 0xFFFF
+        if i.is_dir():
+            os.makedirs(target, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if stat.S_ISLNK(mode):
+            link = z.read(i).decode()
+            if link.startswith("/") or ".." in link.split("/"):
+                sys.exit(f"unsafe symlink in ZIP: {i.filename}")
+            os.symlink(link, target)
+            continue
+        with z.open(i) as s, open(target, "wb") as o:
+            while True:
+                b = s.read(1 << 20)
+                if not b:
+                    break
+                o.write(b)
+        os.chmod(target, 0o755 if mode & 0o111 else 0o644)
+for b in ("Throne", "ThroneCore"):
+    if not os.access(os.path.join(dest, b), os.X_OK):
+        sys.exit(f"{b} is missing from the ZIP")
+PY
+}
+
+install_throne() {
+    local info ver name url sha cur zip=""
+    cur="$(cat "$APP/.decky-version" 2>/dev/null || true)"
+    say "Ищу последнюю версию Throne…"
+    if info="$(throne_release)" && [ -n "$info" ]; then
+        read -r ver name url sha <<<"$info"
+        if [ "$cur" = "$ver" ] && [ -x "$APP/Throne" ]; then
+            ok "Throne $ver уже установлен"
+            return
+        fi
+        say "Скачиваю $name (~75 МБ)…"
+        if curl -fL --progress-bar -o "$WORK/$name" "$url"; then
+            zip="$WORK/$name"
+            if [ "$sha" != "-" ]; then
+                echo "$sha  $zip" | sha256sum -c --quiet - || die "SHA-256 не совпал: файл повреждён"
+                ok "SHA-256 совпадает с релизом"
+            fi
+        fi
+    fi
+    if [ -z "$zip" ]; then
+        zip="$(ls -1t "$HOME"/Downloads/Throne-*-linux-amd64.zip "$HOME"/Загрузки/Throne-*-linux-amd64.zip 2>/dev/null | head -1 || true)"
+        [ -n "$zip" ] || die "GitHub недоступен. Скачайте Throne-<версия>-linux-amd64.zip со страницы
+       https://github.com/$THRONE_REPO/releases в «Загрузки» и запустите скрипт снова."
+        warn "GitHub недоступен, ставлю из $zip"
+        ver="$(basename "$zip" | sed -E 's/^Throne-(.*)-linux-amd64\.zip$/\1/')"
+    fi
+    say "Распаковываю Throne $ver…"
+    extract_throne "$zip" "$WORK/throne" || die "не удалось распаковать Throne"
+    echo "$ver" >"$WORK/throne/.decky-version"
+    sudo systemctl stop "$UNIT" 2>/dev/null || true
+    sudo mkdir -p "$DATA"
+    sudo rm -rf "$APP.new"
+    sudo cp -a "$WORK/throne" "$APP.new"
+    sudo chown -R root:root "$APP.new"
+    sudo chmod 755 "$DATA" "$APP.new"
+    sudo rm -rf "$APP"
+    sudo mv "$APP.new" "$APP"
+    ok "Throne $ver установлен в $APP"
+}
+
+plugin_payload() {
+    cat <<'PAYLOAD'
+@PAYLOAD@
+PAYLOAD
+}
+
+install_plugin() {
+    say "Ставлю плагин Decky «Throne VPN» $PLUGIN_VERSION…"
+    mkdir -p "$WORK/plugin"
+    plugin_payload | base64 -d | tar -xzf - -C "$WORK/plugin" || die "плагин внутри скрипта повреждён"
+    [ -f "$WORK/plugin/$PLUGIN/main.py" ] || die "плагин внутри скрипта повреждён"
+    sudo mkdir -p "$HB/plugins"
+    sudo rm -rf "$PLUG"
+    sudo cp -a "$WORK/plugin/$PLUGIN" "$PLUG"
+    sudo chown -R root:root "$PLUG"
+    sudo systemctl restart plugin_loader || warn "не удалось перезапустить Decky Loader"
+    ok "Плагин установлен"
+}
+
+install_shortcut() {
+    mkdir -p "$SHARE" "$HOME/.local/share/applications"
+    cat >"$GUI" <<EOF
+#!/usr/bin/env bash
+# Окно Throne. Пока оно открыто, служба плагина Decky остановлена: у них общие профили.
+APP="$APP"
+UNIT="$UNIT"
+if systemctl is-active --quiet "\$UNIT"; then
+    systemctl stop "\$UNIT" 2>/dev/null || pkexec systemctl stop "\$UNIT" || exit 1
+fi
+"\$APP/Throne" -appdata "\$@"
+# окно закрыли (Программа → Выход): VPN снова в руках плагина
+systemctl start "\$UNIT" 2>/dev/null || true
+EOF
+    chmod 755 "$GUI"
+    cat >"$WORK/$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Throne
+Comment=Подписки и серверы для Throne VPN в игровом режиме
+Exec=$GUI
+Icon=$APP/Throne.png
+Terminal=false
+Categories=Network;
+EOF
+    install -m 755 "$WORK/$DESKTOP_FILE" "$HOME/.local/share/applications/$DESKTOP_FILE"
+    if [ -d "$HOME/Desktop" ]; then
+        install -m 755 "$WORK/$DESKTOP_FILE" "$HOME/Desktop/$DESKTOP_FILE"
+        command -v gio >/dev/null && gio set "$HOME/Desktop/$DESKTOP_FILE" metadata::trusted true 2>/dev/null || true
+    fi
+    ok "Ярлык «Throne» добавлен в меню и на рабочий стол"
+}
+
+wait_service() {
+    say "Жду, пока Decky запустит службу Throne…"
+    for _ in $(seq 1 60); do
+        if systemctl is-active --quiet "$UNIT"; then
+            ok "Служба Throne работает"
+            return
+        fi
+        sleep 1
+    done
+    warn "Служба ещё не запустилась — плагин запустит её сам. Журнал: journalctl -u $UNIT"
+}
+
+open_gui() {
+    cat <<'EOF'
+
+  Сейчас откроется окно Throne. Как добавить подписку:
+    1. Скопируйте ссылку на подписку (https://…).
+    2. В окне Throne нажмите Ctrl+V
+       (или «Программа» → «Добавить профиль из буфера обмена»).
+    3. Выберите «Создать новую группу подписки» и нажмите OK.
+    4. Закройте Throne через «Программа» → «Выход» (крестик только сворачивает в трей).
+
+  Потом перейдите в игровой режим: кнопка «…» → вкладка Decky → «Throne VPN»
+  → включите VPN. Окно Throne потом открывается ярлыком «Throne».
+
+EOF
+    # отдельный сеанс: окно и перезапуск службы переживут закрытие Konsole
+    if command -v setsid >/dev/null; then
+        setsid -f "$GUI" >/dev/null 2>&1 </dev/null
+    else
+        nohup "$GUI" >/dev/null 2>&1 </dev/null &
+    fi
+}
+
+uninstall() {
+    ensure_sudo
+    say "Удаляю плагин и службу Throne…"
+    sudo systemctl disable --now "$UNIT" 2>/dev/null || true
+    sudo rm -f "/etc/systemd/system/$UNIT" /etc/polkit-1/rules.d/49-decky-throne.rules
+    sudo systemctl daemon-reload
+    sudo rm -rf "$PLUG" "$DATA" "$HB/settings/$PLUGIN"
+    sudo systemctl restart plugin_loader 2>/dev/null || true
+    rm -rf "$SHARE"
+    rm -f "$HOME/.local/share/applications/$DESKTOP_FILE" "$HOME/Desktop/$DESKTOP_FILE"
+    ok "Готово. Профили и подписки остались в ~/.config/Throne (удалите сами, если не нужны)."
+}
+
+main() {
+    preflight
+    case "${1:-}" in
+        --uninstall) uninstall; return ;;
+        "" ) ;;
+        *) die "неизвестный параметр: $1" ;;
+    esac
+    say "Throne VPN для Steam Deck — установка (плагин $PLUGIN_VERSION)"
+    ensure_sudo
+    install_decky
+    install_throne
+    install_plugin
+    install_shortcut
+    wait_service
+    open_gui
+}
+
+main "$@"
